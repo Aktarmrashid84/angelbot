@@ -1,0 +1,17 @@
+services:
+  - type: worker
+    name: angelbot-pro
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
+    envVars:
+      - key: ANGEL_API_KEY
+        sync: false
+      - key: ANGEL_CLIENT_ID
+        sync: false
+      - key: ANGEL_PASSWORD
+        sync: false
+      - key: ANGEL_TOTP
+        sync: false
+      - key: CAPITAL
+        value: "50000"
