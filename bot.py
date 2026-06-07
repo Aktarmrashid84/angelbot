@@ -1,578 +1,629 @@
 """
-╔══════════════════════════════════════════════════════╗
-║   AngelBot PRO — AI Options Trading Bot              ║
-║   Nifty/BankNifty CE/PE Auto Trading                 ║
-║   Target: 10%  |  Stop Loss: 5%                     ║
-║   24/7 Cloud — Phone/Laptop OFF ho tab bhi chalta    ║
-╚══════════════════════════════════════════════════════╝
+AngelBot PRO MAX v3.0
+All Index Options: Nifty + BankNifty + Sensex + Midcap + Bankex + FinNifty
+AI Strategy | Telegram | Google Sheets | Trailing SL
+Target: 10% | Stop Loss: 5% | Daily Loss Limit: 5%
 """
 
-import os, time, logging, math, json, requests
+import os, time, logging, json, requests, base64
 from datetime import datetime, date, timedelta, time as dtime
 from SmartApi import SmartConnect
 import pyotp
 import numpy as np
 
-# ═══════════════════════════════════════════════════════
-#  SIRF YEH BHARO — BAAKI SAB BOT KHUD DECIDE KAREGA
-# ═══════════════════════════════════════════════════════
-API_KEY      = os.getenv("ANGEL_API_KEY",   "rjRimMjk")
-CLIENT_ID    = os.getenv("ANGEL_CLIENT_ID", "M410221")
-PASSWORD     = os.getenv("ANGEL_PASSWORD",  "APNA_PIN")
-TOTP_SECRET  = os.getenv("ANGEL_TOTP",      "NNWTNV7ZSNVUYRNF4ZY4TY3LDU")
-CAPITAL      = float(os.getenv("CAPITAL",   "50000"))   # aapka total capital ₹
+# ═══ ANGEL ONE CREDENTIALS ═════════════════════════════
+API_KEY     = os.getenv("ANGEL_API_KEY",    "rjRimMjk")
+CLIENT_ID   = os.getenv("ANGEL_CLIENT_ID",  "M410221")
+PASSWORD    = os.getenv("ANGEL_PASSWORD",   "9864")
+TOTP_SECRET = os.getenv("ANGEL_TOTP",       "NNWTNV7ZSNVUYRNF4ZY4TY3LDU")
+CAPITAL     = float(os.getenv("CAPITAL",    "50000"))
 
-# ═══════════════════════════════════════════════════════
-#  FIXED RULES (aapki marzi ke hisaab se)
-# ═══════════════════════════════════════════════════════
-TARGET_PCT   = 10.0   # 10% profit pe exit
-SL_PCT       = 5.0    # 5% loss pe exit
-MAX_CAPITAL_PER_TRADE_PCT = 20  # capital ka max 20% ek trade mein
-MAX_TRADES_PER_DAY = 0  # 0 = bot khud decide karta hai (market condition ke hisaab se)
+# ═══ TELEGRAM ══════════════════════════════════════════
+TG_TOKEN    = os.getenv("TG_TOKEN",    "8531854367:AAGvxR2XYFx0EHHiZNYQQP0JGxHkV0vZXIE")
+TG_CHAT_ID  = os.getenv("TG_CHAT_ID",  "1061234677")
 
-# ═══════════════════════════════════════════════════════
+# ═══ GOOGLE SHEETS ══════════════════════════════════════
+SHEET_ID    = os.getenv("SHEET_ID",    "1NFr0P0lEwiHvg7FC_HQaTnaQfUoONQeNBEaMsA8f3K8")
+GOOGLE_CREDS = os.getenv("GOOGLE_CREDS", "")  # Railway mein JSON paste karna hoga
+
+# ═══ FIXED RULES ═══════════════════════════════════════
+TARGET_PCT        = 10.0   # 10% profit pe exit
+SL_PCT            = 5.0    # 5% stop loss
+TRAIL_SL_PCT      = 3.0    # 3% trailing stop loss
+DAILY_LOSS_LIMIT  = 5.0    # 5% capital loss pe band
+MAX_CAPITAL_TRADE = 0.20   # 20% capital per trade
+
+# ═══ ALL 6 INDICES ══════════════════════════════════════
+INDICES = {
+    "NIFTY": {
+        "token": "99926000", "exchange": "NSE",
+        "strike_gap": 50, "lot_size": 50,
+        "opt_exch": "NFO", "prefix": "NIFTY",
+    },
+    "BANKNIFTY": {
+        "token": "99926009", "exchange": "NSE",
+        "strike_gap": 100, "lot_size": 15,
+        "opt_exch": "NFO", "prefix": "BANKNIFTY",
+    },
+    "SENSEX": {
+        "token": "99919000", "exchange": "BSE",
+        "strike_gap": 100, "lot_size": 10,
+        "opt_exch": "BFO", "prefix": "SENSEX",
+    },
+    "MIDCPNIFTY": {
+        "token": "99926074", "exchange": "NSE",
+        "strike_gap": 25, "lot_size": 75,
+        "opt_exch": "NFO", "prefix": "MIDCPNIFTY",
+    },
+    "BANKEX": {
+        "token": "99919012", "exchange": "BSE",
+        "strike_gap": 100, "lot_size": 15,
+        "opt_exch": "BFO", "prefix": "BANKEX",
+    },
+    "FINNIFTY": {
+        "token": "99926037", "exchange": "NSE",
+        "strike_gap": 50, "lot_size": 40,
+        "opt_exch": "NFO", "prefix": "FINNIFTY",
+    },
+}
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[
-        logging.FileHandler("bot.log"),
-        logging.StreamHandler()
-    ]
+    handlers=[logging.FileHandler("bot.log"), logging.StreamHandler()]
 )
-log = logging.getLogger("AngelBotPRO")
-
-# ─── INDEX CONFIG ──────────────────────────────────────
-INDICES = {
-    "NIFTY": {
-        "token":        "99926000",
-        "exchange":     "NSE",
-        "strike_gap":   50,       # Nifty strikes 50-50 pe hote hain
-        "lot_size":     50,       # 1 lot = 50 qty
-        "option_exch":  "NFO",
-    },
-    "BANKNIFTY": {
-        "token":        "99926009",
-        "exchange":     "NSE",
-        "strike_gap":   100,      # BankNifty strikes 100-100
-        "lot_size":     15,
-        "option_exch":  "NFO",
-    }
-}
+log = logging.getLogger("AngelBot")
 
 
-class MarketBrain:
-    """AI brain — khud decide karta hai kya karna hai"""
+# ═══ TELEGRAM ══════════════════════════════════════════
+def tg(msg):
+    if not TG_TOKEN or not TG_CHAT_ID:
+        return
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
+            json={"chat_id": TG_CHAT_ID, "text": msg, "parse_mode": "HTML"},
+            timeout=5
+        )
+    except:
+        pass
 
+
+# ═══ GOOGLE SHEETS ══════════════════════════════════════
+def sheets_append(row_data):
+    """Google Sheets mein trade data save karo"""
+    if not GOOGLE_CREDS or not SHEET_ID:
+        return
+    try:
+        creds = json.loads(GOOGLE_CREDS)
+        # Get access token
+        import urllib.request, urllib.parse
+        token_url = "https://oauth2.googleapis.com/token"
+        now = int(time.time())
+        header = base64.urlsafe_b64encode(json.dumps({"alg":"RS256","typ":"JWT"}).encode()).decode().rstrip("=")
+        payload = base64.urlsafe_b64encode(json.dumps({
+            "iss": creds["client_email"],
+            "scope": "https://www.googleapis.com/auth/spreadsheets",
+            "aud": token_url,
+            "exp": now + 3600,
+            "iat": now
+        }).encode()).decode().rstrip("=")
+
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import padding
+        private_key = serialization.load_pem_private_key(
+            creds["private_key"].encode(), password=None
+        )
+        sig = base64.urlsafe_b64encode(
+            private_key.sign(f"{header}.{payload}".encode(), padding.PKCS1v15(), hashes.SHA256())
+        ).decode().rstrip("=")
+        jwt = f"{header}.{payload}.{sig}"
+
+        r = requests.post(token_url, data={
+            "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+            "assertion": jwt
+        }, timeout=10)
+        access_token = r.json()["access_token"]
+
+        # Append to sheet
+        requests.post(
+            f"https://sheets.googleapis.com/v4/spreadsheets/{SHEET_ID}/values/Sheet1!A1:append",
+            headers={"Authorization": f"Bearer {access_token}"},
+            params={"valueInputOption": "RAW"},
+            json={"values": [row_data]},
+            timeout=10
+        )
+        log.info("Google Sheets updated!")
+    except Exception as e:
+        log.warning(f"Sheets error: {e}")
+
+
+def init_sheet_headers():
+    """Sheet mein headers daalo pehli baar"""
+    headers = ["Date", "Time", "Index", "Direction", "Strike",
+               "Buy Price", "Sell Price", "Qty", "Lots",
+               "P&L (₹)", "P&L (%)", "Reason", "Duration", "Today P&L"]
+    sheets_append(headers)
+
+
+# ═══ AI BRAIN ══════════════════════════════════════════
+class AIBrain:
     def __init__(self):
-        self.price_history = {"NIFTY": [], "BANKNIFTY": []}
-        self.vix_history   = []
+        self.prices = {k: [] for k in INDICES}
 
-    def add_price(self, index, price):
-        h = self.price_history[index]
-        h.append(float(price))
-        if len(h) > 200:
-            h.pop(0)
+    def add(self, index, price):
+        p = self.prices[index]
+        p.append(float(price))
+        if len(p) > 200:
+            p.pop(0)
 
-    # ── RSI ──────────────────────────────────────────
-    def rsi(self, prices, period=14):
-        if len(prices) < period + 1:
-            return 50.0
-        deltas = np.diff(prices[-(period+1):])
-        g = deltas[deltas > 0].mean() if (deltas > 0).any() else 1e-9
-        l = abs(deltas[deltas < 0].mean()) if (deltas < 0).any() else 1e-9
-        return round(100 - 100 / (1 + g / l), 2)
-
-    # ── EMA ──────────────────────────────────────────
-    def ema(self, prices, period):
-        if len(prices) < period:
-            return prices[-1]
-        k, e = 2 / (period + 1), prices[-period]
-        for p in prices[-period+1:]:
-            e = p * k + e * (1 - k)
+    def ema(self, arr, n):
+        if len(arr) < n:
+            return arr[-1]
+        k, e = 2/(n+1), arr[-n]
+        for x in arr[-n+1:]:
+            e = x*k + e*(1-k)
         return round(e, 2)
 
-    # ── MACD ─────────────────────────────────────────
-    def macd(self, prices):
-        if len(prices) < 26:
-            return 0.0
-        return round(self.ema(prices, 12) - self.ema(prices, 26), 2)
+    def rsi(self, arr, n=14):
+        if len(arr) < n+1:
+            return 50.0
+        d = np.diff(arr[-(n+1):])
+        g = d[d>0].mean() if (d>0).any() else 1e-9
+        l = abs(d[d<0].mean()) if (d<0).any() else 1e-9
+        return round(100 - 100/(1+g/l), 2)
 
-    # ── SUPERTREND (simplified) ────────────────────
-    def supertrend_signal(self, prices):
-        if len(prices) < 20:
+    def macd(self, arr):
+        if len(arr) < 26:
+            return 0.0
+        return round(self.ema(arr, 12) - self.ema(arr, 26), 2)
+
+    def bollinger(self, arr, n=20):
+        if len(arr) < n:
+            return None, None, None
+        a = np.array(arr[-n:])
+        return round(a.mean()+2*a.std(), 2), round(a.mean(), 2), round(a.mean()-2*a.std(), 2)
+
+    def supertrend(self, arr):
+        if len(arr) < 20:
             return "neutral"
-        mid = np.mean(prices[-20:])
-        cur = prices[-1]
+        mid = np.mean(arr[-20:])
+        cur = arr[-1]
         if cur > mid * 1.002:
             return "bullish"
         elif cur < mid * 0.998:
             return "bearish"
         return "neutral"
 
-    # ── BOLLINGER BANDS ───────────────────────────
-    def bollinger(self, prices, period=20):
-        if len(prices) < period:
-            return None, None, None
-        arr  = np.array(prices[-period:])
-        mid  = arr.mean()
-        std  = arr.std()
-        return round(mid + 2*std, 2), round(mid, 2), round(mid - 2*std, 2)
+    def vwap(self, arr):
+        return round(np.mean(arr[-20:]), 2) if len(arr) >= 20 else arr[-1]
 
-    # ── VOLATILITY ────────────────────────────────
-    def volatility(self, prices, period=10):
-        if len(prices) < period + 1:
-            return 1.0
-        returns = np.diff(np.log(prices[-period-1:]))
-        return round(float(np.std(returns) * 100), 3)
+    def momentum(self, arr, n=10):
+        if len(arr) < n+1:
+            return 0
+        return round((arr[-1]-arr[-(n+1)])/arr[-(n+1)]*100, 3)
 
-    # ══════════════════════════════════════════════
-    #  MAIN DECISION — Bot khud decide karta hai
-    #  Returns: (index, ce_or_pe, confidence, reasons)
-    # ══════════════════════════════════════════════
-    def decide(self, nifty_price, banknifty_price):
-        scores = {"NIFTY_CE": 0, "NIFTY_PE": 0,
-                  "BANKNIFTY_CE": 0, "BANKNIFTY_PE": 0}
+    def market_structure(self, arr):
+        if len(arr) < 20:
+            return "neutral"
+        r = arr[-20:]
+        m = len(r)//2
+        if max(r[m:]) > max(r[:m]) and min(r[m:]) > min(r[:m]):
+            return "uptrend"
+        elif max(r[m:]) < max(r[:m]) and min(r[m:]) < min(r[:m]):
+            return "downtrend"
+        return "sideways"
+
+    def analyze(self, index):
+        arr = self.prices[index]
+        if len(arr) < 15:
+            return None, 0, [f"Data collect ho raha hai ({len(arr)}/15)"]
+
+        cur = arr[-1]
+        rsi_v = self.rsi(arr)
+        macd_v = self.macd(arr)
+        e9, e21, e50 = self.ema(arr,9), self.ema(arr,21), self.ema(arr,min(50,len(arr)))
+        ub, mb, lb = self.bollinger(arr)
+        st = self.supertrend(arr)
+        vwap_v = self.vwap(arr)
+        mom = self.momentum(arr)
+        ms = self.market_structure(arr)
+
+        ce = pe = 0
         reasons = []
 
-        for idx, price in [("NIFTY", nifty_price), ("BANKNIFTY", banknifty_price)]:
-            ph = self.price_history[idx]
-            if len(ph) < 15:
-                reasons.append(f"{idx}: data collect ho raha hai ({len(ph)}/15)")
-                continue
+        # RSI
+        if rsi_v < 30:   ce += 35; reasons.append(f"RSI={rsi_v} oversold→CE")
+        elif rsi_v < 40: ce += 20; reasons.append(f"RSI={rsi_v} weak→CE")
+        elif rsi_v > 70: pe += 35; reasons.append(f"RSI={rsi_v} overbought→PE")
+        elif rsi_v > 60: pe += 20; reasons.append(f"RSI={rsi_v} high→PE")
 
-            rsi_val  = self.rsi(ph)
-            macd_val = self.macd(ph)
-            st_sig   = self.supertrend_signal(ph)
-            ub, mb, lb = self.bollinger(ph)
-            vol      = self.volatility(ph)
-            ema9     = self.ema(ph, 9)
-            ema21    = self.ema(ph, 21)
-            cur      = ph[-1]
+        # MACD
+        if macd_v > 0:   ce += 25; reasons.append(f"MACD={macd_v} bullish→CE")
+        else:            pe += 25; reasons.append(f"MACD={macd_v} bearish→PE")
 
-            # ── BULLISH signals → BUY CE ──────────
-            if rsi_val < 35:
-                scores[f"{idx}_CE"] += 35
-                reasons.append(f"{idx} RSI={rsi_val} oversold → CE")
-            if rsi_val > 65:
-                scores[f"{idx}_PE"] += 35
-                reasons.append(f"{idx} RSI={rsi_val} overbought → PE")
+        # EMA
+        if cur > e9 > e21 > e50:   ce += 25; reasons.append("Strong uptrend→CE")
+        elif cur > e9 > e21:       ce += 15; reasons.append("Uptrend→CE")
+        elif cur < e9 < e21 < e50: pe += 25; reasons.append("Strong downtrend→PE")
+        elif cur < e9 < e21:       pe += 15; reasons.append("Downtrend→PE")
 
-            if macd_val > 0:
-                scores[f"{idx}_CE"] += 25
-                reasons.append(f"{idx} MACD={macd_val} bullish → CE")
-            else:
-                scores[f"{idx}_PE"] += 25
-                reasons.append(f"{idx} MACD={macd_val} bearish → PE")
+        # Bollinger
+        if ub and lb:
+            if cur < lb:   ce += 20; reasons.append("Below lower BB→CE bounce")
+            elif cur > ub: pe += 20; reasons.append("Above upper BB→PE reversal")
 
-            if st_sig == "bullish":
-                scores[f"{idx}_CE"] += 20
-                reasons.append(f"{idx} Supertrend bullish → CE")
-            elif st_sig == "bearish":
-                scores[f"{idx}_PE"] += 20
-                reasons.append(f"{idx} Supertrend bearish → PE")
+        # Supertrend
+        if st == "bullish":   ce += 20; reasons.append("Supertrend bullish→CE")
+        elif st == "bearish": pe += 20; reasons.append("Supertrend bearish→PE")
 
-            if ub and cur > ub:
-                scores[f"{idx}_PE"] += 15
-                reasons.append(f"{idx} price above upper BB → PE reversal")
-            elif lb and cur < lb:
-                scores[f"{idx}_CE"] += 15
-                reasons.append(f"{idx} price below lower BB → CE bounce")
+        # VWAP
+        if cur > vwap_v:   ce += 10; reasons.append(f"Above VWAP→CE")
+        else:              pe += 10; reasons.append(f"Below VWAP→PE")
 
-            if ema9 > ema21:
-                scores[f"{idx}_CE"] += 15
-                reasons.append(f"{idx} EMA9>EMA21 uptrend → CE")
-            else:
-                scores[f"{idx}_PE"] += 15
-                reasons.append(f"{idx} EMA9<EMA21 downtrend → PE")
+        # Momentum
+        if mom > 0.5:    ce += 15; reasons.append(f"Strong momentum→CE")
+        elif mom > 0:    ce += 5
+        elif mom < -0.5: pe += 15; reasons.append(f"Negative momentum→PE")
+        elif mom < 0:    pe += 5
 
-            # High volatility mein zyada lot size adjust
-            if vol > 0.3:
-                scores[f"{idx}_CE"] = int(scores[f"{idx}_CE"] * 0.9)
-                scores[f"{idx}_PE"] = int(scores[f"{idx}_PE"] * 0.9)
-                reasons.append(f"{idx} high volatility — score reduced")
+        # Market structure
+        if ms == "uptrend":   ce += 15; reasons.append("Higher highs→CE")
+        elif ms == "downtrend": pe += 15; reasons.append("Lower lows→PE")
+        elif ms == "sideways":
+            ce = int(ce * 0.85)
+            pe = int(pe * 0.85)
 
-        # ── Best option select karo ────────────────
-        best = max(scores, key=scores.get)
-        best_score = scores[best]
+        total = ce + pe
+        if total == 0:
+            return None, 0, reasons
 
-        if best_score < 50:
-            return None, None, best_score, ["Signal weak — wait karo"]
-
-        parts     = best.split("_")
-        index     = parts[0]
-        direction = parts[1]  # CE or PE
-        return index, direction, best_score, reasons
-
-    # ── How many trades today ─────────────────────
-    def max_trades_today(self, vix_approx=15):
-        """Market condition ke hisaab se decide karta hai"""
-        if vix_approx > 20:
-            return 2   # high volatility — cautious
-        elif vix_approx > 15:
-            return 3   # normal
+        if ce > pe:
+            return "CE", min(95, int(ce/total*100+10)), reasons
         else:
-            return 4   # low volatility — more trades ok
+            return "PE", min(95, int(pe/total*100+10)), reasons
+
+    def best_index(self, prices_dict):
+        best_idx = best_dir = best_reasons = None
+        best_conf = 0
+        for idx in INDICES:
+            if not prices_dict.get(idx):
+                continue
+            direction, conf, reasons = self.analyze(idx)
+            if direction and conf > best_conf:
+                best_conf = conf
+                best_idx = idx
+                best_dir = direction
+                best_reasons = reasons
+        return best_idx, best_dir, best_conf, best_reasons or []
 
 
-class OptionsHelper:
-    """Option strike dhundhta hai"""
-
-    @staticmethod
-    def nearest_strike(price, gap):
-        return int(round(price / gap) * gap)
-
-    @staticmethod
-    def get_expiry():
-        """Current week ka Thursday expiry"""
-        today = date.today()
-        days_till_thu = (3 - today.weekday()) % 7
-        expiry = today + timedelta(days=days_till_thu)
-        if expiry < today:
-            expiry += timedelta(days=7)
-        return expiry.strftime("%d%b%Y").upper()  # e.g. 06JUN2024
-
-    @staticmethod
-    def build_symbol(index, strike, direction, expiry):
-        """e.g. NIFTY06JUN2024C24000"""
-        opt_type = "C" if direction == "CE" else "P"
-        return f"{index}{expiry}{opt_type}{strike}"
-
-
-class AngelBotPRO:
+# ═══ MAIN BOT ══════════════════════════════════════════
+class AngelBot:
 
     def __init__(self):
-        self.api        = None
-        self.brain      = MarketBrain()
-        self.opt        = OptionsHelper()
-        self.position   = None
-        self.trades_today = 0
-        self.pnl_today  = 0.0
-        self.daily_log  = []
-        self.last_date  = date.today()
+        self.api           = None
+        self.brain         = AIBrain()
+        self.position      = None
+        self.trades_today  = 0
+        self.pnl_today     = 0.0
+        self.daily_log     = []
+        self.last_date     = date.today()
+        self.spot_prices   = {}
+        self.headers_added = False
+        self.highest_price = 0  # for trailing SL
 
-    # ── LOGIN ─────────────────────────────────────
     def login(self):
         try:
             totp = pyotp.TOTP(TOTP_SECRET).now()
             self.api = SmartConnect(api_key=API_KEY)
-            data = self.api.generateSession(CLIENT_ID, PASSWORD, totp)
-            if data["status"]:
-                log.info(f"✓ Login success: {CLIENT_ID}")
+            r = self.api.generateSession(CLIENT_ID, PASSWORD, totp)
+            if r["status"]:
+                log.info(f"✓ Login: {CLIENT_ID}")
+                tg(f"🤖 <b>AngelBot PRO MAX Started!</b>\n"
+                   f"💰 Capital: ₹{CAPITAL}\n"
+                   f"🎯 Target: {TARGET_PCT}% | 🛑 SL: {SL_PCT}%\n"
+                   f"📉 Daily Loss Limit: {DAILY_LOSS_LIMIT}%\n"
+                   f"📊 Indices: NIFTY, BANKNIFTY, SENSEX, MIDCAP, BANKEX, FINNIFTY")
                 return True
-            log.error(f"✗ Login failed: {data['message']}")
+            log.error(f"✗ Login: {r['message']}")
+            tg(f"❌ Login failed: {r['message']}")
         except Exception as e:
-            log.error(f"Login exception: {e}")
+            log.error(f"Login error: {e}")
         return False
 
-    # ── MARKET HOURS ──────────────────────────────
     def is_market_open(self):
-        now   = datetime.now()
-        t     = now.time()
-        wday  = now.weekday()
-        if wday >= 5:
+        now = datetime.now()
+        if now.weekday() >= 5:
             return False
+        t = now.time()
         return dtime(9, 15) <= t <= dtime(15, 25)
 
-    def is_trading_window(self):
-        """Best time for intraday options: 9:20 to 3:15"""
+    def best_time(self):
         t = datetime.now().time()
-        return dtime(9, 20) <= t <= dtime(15, 15)
+        return dtime(9, 20) <= t <= dtime(15, 10)
 
-    def time_to_close(self):
-        return datetime.now().time() >= dtime(15, 15)
+    def closing_time(self):
+        return datetime.now().time() >= dtime(15, 10)
 
-    # ── GET PRICE ─────────────────────────────────
+    def daily_loss_hit(self):
+        limit = CAPITAL * DAILY_LOSS_LIMIT / 100
+        return self.pnl_today <= -limit
+
     def get_ltp(self, token, exchange="NSE"):
         try:
-            data = self.api.ltpData(exchange, "", token)
-            if data["status"]:
-                return float(data["data"]["ltp"])
+            r = self.api.ltpData(exchange, "", token)
+            if r["status"]:
+                return float(r["data"]["ltp"])
         except Exception as e:
-            log.warning(f"LTP error token={token}: {e}")
+            log.warning(f"LTP error: {e}")
         return None
 
-    # ── GET OPTION TOKEN ──────────────────────────
-    def get_option_token(self, symbol, exchange="NFO"):
-        """Option ka token fetch karo Angel API se"""
+    def get_option_token(self, symbol, exchange):
         try:
-            data = self.api.searchScrip(exchange, symbol)
-            if data["status"] and data["data"]:
-                return data["data"][0]["symboltoken"]
-        except Exception as e:
-            log.warning(f"Option token error {symbol}: {e}")
+            r = self.api.searchScrip(exchange, symbol)
+            if r["status"] and r["data"]:
+                return r["data"][0]["symboltoken"]
+        except:
+            pass
         return None
 
-    # ── PLACE ORDER ───────────────────────────────
-    def place_order(self, symbol, token, side, qty, exchange="NFO"):
+    def place_order(self, symbol, token, side, qty, exchange):
         try:
-            order = self.api.placeOrder({
-                "variety":         "NORMAL",
-                "tradingsymbol":   symbol,
-                "symboltoken":     token,
-                "transactiontype": side,
-                "exchange":        exchange,
-                "ordertype":       "MARKET",
-                "producttype":     "INTRADAY",
-                "duration":        "DAY",
-                "price":           "0",
-                "squareoff":       "0",
-                "stoploss":        "0",
-                "quantity":        str(qty),
+            r = self.api.placeOrder({
+                "variety": "NORMAL", "tradingsymbol": symbol,
+                "symboltoken": token, "transactiontype": side,
+                "exchange": exchange, "ordertype": "MARKET",
+                "producttype": "INTRADAY", "duration": "DAY",
+                "price": "0", "quantity": str(qty),
             })
-            if order["status"]:
-                oid = order["data"]["orderid"]
-                log.info(f"✓ ORDER: {side} {symbol} x{qty} | ID:{oid}")
-                return oid
-            else:
-                log.error(f"✗ Order failed: {order['message']}")
+            if r["status"]:
+                log.info(f"✓ {side} {symbol} x{qty} | ID:{r['data']['orderid']}")
+                return r["data"]["orderid"]
+            log.error(f"✗ {r['message']}")
         except Exception as e:
-            log.error(f"Order exception: {e}")
+            log.error(f"Order error: {e}")
         return None
 
-    # ── EXECUTE TRADE ─────────────────────────────
-    def open_trade(self, index, direction, entry_price):
-        cfg        = INDICES[index]
-        lot_size   = cfg["lot_size"]
-        max_cap    = CAPITAL * MAX_CAPITAL_PER_TRADE_PCT / 100
-        lots       = max(1, int(max_cap / (entry_price * lot_size)))
-        qty        = lots * lot_size
+    def get_expiry(self):
+        today = date.today()
+        days = (3 - today.weekday()) % 7
+        exp = today + timedelta(days=days)
+        if exp <= today:
+            exp += timedelta(days=7)
+        return exp.strftime("%d%b%Y").upper()
 
-        # Strike calculation
-        spot       = self.get_ltp(cfg["token"], cfg["exchange"])
+    def open_trade(self, index, direction, reasons):
+        cfg = INDICES[index]
+        spot = self.spot_prices.get(index)
         if not spot:
-            log.error("Cannot get spot price"); return
+            return
 
-        strike     = self.opt.nearest_strike(spot, cfg["strike_gap"])
-        expiry     = self.opt.get_expiry()
-        symbol     = self.opt.build_symbol(index, strike, direction, expiry)
-        token      = self.get_option_token(symbol, cfg["option_exch"])
-
+        strike = int(round(spot / cfg["strike_gap"]) * cfg["strike_gap"])
+        expiry = self.get_expiry()
+        sym = f"{cfg['prefix']}{expiry}{'C' if direction=='CE' else 'P'}{strike}"
+        token = self.get_option_token(sym, cfg["opt_exch"])
         if not token:
-            log.error(f"Token not found for {symbol}"); return
+            log.warning(f"Token not found: {sym}")
+            return
 
-        sl_px  = round(entry_price * (1 - SL_PCT / 100), 2)
-        tp_px  = round(entry_price * (1 + TARGET_PCT / 100), 2)
+        price = self.get_ltp(token, cfg["opt_exch"])
+        if not price or price < 5:
+            log.warning(f"Option price too low: {price}")
+            return
 
-        oid = self.place_order(symbol, token, "BUY", qty, cfg["option_exch"])
+        lots = max(1, int(CAPITAL * MAX_CAPITAL_TRADE / (price * cfg["lot_size"])))
+        qty = lots * cfg["lot_size"]
+        sl = round(price * (1 - SL_PCT/100), 2)
+        tp = round(price * (1 + TARGET_PCT/100), 2)
+
+        oid = self.place_order(sym, token, "BUY", qty, cfg["opt_exch"])
         if oid:
             self.position = {
-                "index":     index,
-                "direction": direction,
-                "symbol":    symbol,
-                "token":     token,
-                "exchange":  cfg["option_exch"],
-                "qty":       qty,
-                "lots":      lots,
-                "entry":     entry_price,
-                "sl":        sl_px,
-                "tp":        tp_px,
-                "oid":       oid,
-                "open_time": datetime.now(),
+                "index": index, "direction": direction,
+                "symbol": sym, "token": token,
+                "exchange": cfg["opt_exch"], "qty": qty,
+                "lots": lots, "entry": price, "sl": sl, "tp": tp,
+                "highest": price, "open_time": datetime.now(),
             }
+            self.highest_price = price
             self.trades_today += 1
-            log.info(f"★ TRADE OPEN | {index} {direction} {strike} | "
-                     f"Entry ₹{entry_price} | SL ₹{sl_px} | TP ₹{tp_px} | "
-                     f"Qty:{qty} ({lots} lots)")
 
-    def close_trade(self, current_price, reason):
+            reason_text = " | ".join(reasons[:3]) if reasons else "AI Signal"
+            log.info(f"★ OPEN | {index} {direction} {strike} | ₹{price} | SL:₹{sl} TP:₹{tp} | {lots} lots")
+            tg(f"🟢 <b>TRADE OPEN</b>\n"
+               f"📊 {index} {direction} {strike}\n"
+               f"💰 Entry: ₹{price}\n"
+               f"🛑 SL: ₹{sl} | 🎯 TP: ₹{tp}\n"
+               f"📦 Lots: {lots} | Qty: {qty}\n"
+               f"🧠 {reason_text}\n"
+               f"⏰ {datetime.now().strftime('%H:%M:%S')}")
+
+    def close_trade(self, price, reason):
         if not self.position:
             return
-        pos = self.position
-        oid = self.place_order(
-            pos["symbol"], pos["token"], "SELL",
-            pos["qty"], pos["exchange"]
-        )
+        p = self.position
+        oid = self.place_order(p["symbol"], p["token"], "SELL", p["qty"], p["exchange"])
         if oid:
-            pnl = round((current_price - pos["entry"]) * pos["qty"], 2)
+            pnl = round((price - p["entry"]) * p["qty"], 2)
+            pnl_pct = round((price - p["entry"]) / p["entry"] * 100, 2)
             self.pnl_today += pnl
-            duration = str(datetime.now() - pos["open_time"]).split(".")[0]
+            dur = str(datetime.now() - p["open_time"]).split(".")[0]
 
-            log.info(f"★ TRADE CLOSED [{reason}]")
-            log.info(f"  Entry: ₹{pos['entry']}  Exit: ₹{current_price}")
-            log.info(f"  P&L: ₹{pnl}  Duration: {duration}")
+            log.info(f"★ CLOSE [{reason}] | Entry:₹{p['entry']} Exit:₹{price} | P&L:₹{pnl} ({pnl_pct}%)")
             log.info(f"  Today P&L: ₹{self.pnl_today} | Trades: {self.trades_today}")
 
+            emoji = "✅" if pnl > 0 else "❌"
+            tg(f"{emoji} <b>TRADE CLOSED</b>\n"
+               f"📊 {p['symbol']}\n"
+               f"💰 Entry: ₹{p['entry']} → Exit: ₹{price}\n"
+               f"{'🟢' if pnl>0 else '🔴'} P&amp;L: ₹{pnl} ({pnl_pct}%)\n"
+               f"📋 Reason: {reason}\n"
+               f"📈 Today Total: ₹{round(self.pnl_today,2)}\n"
+               f"⏱ Duration: {dur}")
+
+            # Google Sheets save
+            now = datetime.now()
+            sheets_append([
+                now.strftime("%d-%m-%Y"),
+                now.strftime("%H:%M:%S"),
+                p["index"], p["direction"],
+                p["symbol"].replace(p["index"],"").replace("C","").replace("P","")[-5:],
+                p["entry"], price,
+                p["qty"], p["lots"],
+                pnl, pnl_pct,
+                reason, dur,
+                round(self.pnl_today, 2)
+            ])
+
             self.daily_log.append({
-                "symbol":  pos["symbol"],
-                "entry":   pos["entry"],
-                "exit":    current_price,
-                "pnl":     pnl,
-                "reason":  reason,
-                "time":    str(datetime.now()),
+                "symbol": p["symbol"], "entry": p["entry"],
+                "exit": price, "pnl": pnl, "reason": reason
             })
             self.position = None
+            self.highest_price = 0
 
-    # ── MONITOR OPEN POSITION ─────────────────────
-    def monitor_position(self):
+    def monitor(self):
         if not self.position:
             return
-        pos   = self.position
-        price = self.get_ltp(pos["token"], pos["exchange"])
+        p = self.position
+        price = self.get_ltp(p["token"], p["exchange"])
         if not price:
             return
 
-        pct_change = (price - pos["entry"]) / pos["entry"] * 100
-        log.info(f"  Position: {pos['symbol']} | Now ₹{price} | "
-                 f"Change: {pct_change:+.2f}% | SL ₹{pos['sl']} | TP ₹{pos['tp']}")
+        pct = (price - p["entry"]) / p["entry"] * 100
+        log.info(f"  Monitor: {p['symbol']} ₹{price} | {pct:+.2f}% | SL:₹{p['sl']} TP:₹{p['tp']}")
 
-        if price >= pos["tp"]:
-            log.info(f"TARGET HIT! +{TARGET_PCT}%")
+        # Trailing SL update
+        if price > self.highest_price:
+            self.highest_price = price
+            new_sl = round(price * (1 - TRAIL_SL_PCT/100), 2)
+            if new_sl > p["sl"]:
+                p["sl"] = new_sl
+                log.info(f"  Trailing SL updated: ₹{new_sl}")
+
+        # Check exit conditions
+        if price >= p["tp"]:
             self.close_trade(price, f"TARGET +{TARGET_PCT}%")
-        elif price <= pos["sl"]:
-            log.info(f"STOP LOSS HIT! -{SL_PCT}%")
+        elif price <= p["sl"]:
             self.close_trade(price, f"STOP LOSS -{SL_PCT}%")
 
-    # ── DAILY SUMMARY ─────────────────────────────
-    def daily_summary(self):
-        wins   = sum(1 for t in self.daily_log if t["pnl"] > 0)
-        losses = sum(1 for t in self.daily_log if t["pnl"] <= 0)
-        log.info("=" * 55)
-        log.info(f"  DAY SUMMARY — {date.today()}")
-        log.info(f"  Total Trades : {self.trades_today}")
-        log.info(f"  Wins         : {wins}")
-        log.info(f"  Losses       : {losses}")
-        log.info(f"  Net P&L      : ₹{round(self.pnl_today, 2)}")
-        log.info(f"  Capital      : ₹{CAPITAL}")
-        log.info(f"  Return       : {round(self.pnl_today/CAPITAL*100, 2)}%")
-        log.info("=" * 55)
-        # Save to file
-        with open(f"summary_{date.today()}.json", "w") as f:
-            json.dump({
-                "date":        str(date.today()),
-                "pnl":         self.pnl_today,
-                "trades":      self.trades_today,
-                "wins":        wins,
-                "losses":      losses,
-                "trade_log":   self.daily_log,
-            }, f, indent=2)
+    def max_trades(self):
+        if self.trades_today == 0:
+            return 1
+        last = self.daily_log[-1] if self.daily_log else None
+        if last and last["pnl"] > 0:
+            return self.trades_today + 2
+        return self.trades_today + 1
 
-    # ══════════════════════════════════════════════
-    #  MAIN LOOP
-    # ══════════════════════════════════════════════
+    def daily_summary(self):
+        wins = sum(1 for t in self.daily_log if t["pnl"] > 0)
+        loss = len(self.daily_log) - wins
+        ret = round(self.pnl_today/CAPITAL*100, 2)
+        log.info(f"DAY SUMMARY | P&L:₹{self.pnl_today} | W:{wins} L:{loss} | {ret}%")
+        tg(f"📊 <b>Day Summary — {date.today()}</b>\n"
+           f"Total Trades: {self.trades_today}\n"
+           f"✅ Wins: {wins} | ❌ Loss: {loss}\n"
+           f"💰 Net P&amp;L: ₹{round(self.pnl_today,2)}\n"
+           f"📈 Return: {ret}%\n"
+           f"🏦 Capital: ₹{CAPITAL}")
+
     def run(self):
         log.info("╔══════════════════════════════════════════════════╗")
-        log.info("║   AngelBot PRO — AI Options Trading Bot          ║")
-        log.info(f"║   Capital: ₹{CAPITAL:<10} SL: {SL_PCT}%  TP: {TARGET_PCT}%          ║")
+        log.info("║  AngelBot PRO MAX v3.0                           ║")
+        log.info("║  6 Indices | Telegram | Sheets | Trailing SL    ║")
         log.info("╚══════════════════════════════════════════════════╝")
 
         if not self.login():
-            log.error("Login failed — exiting"); return
-
-        vix_approx    = 15
-        scan_interval = 60  # seconds
-        max_trades    = self.brain.max_trades_today(vix_approx)
-        log.info(f"Today max trades allowed: {max_trades}")
+            return
 
         while True:
             now = datetime.now()
 
-            # ── New day reset ───────────────────────
+            # New day reset
             if now.date() != self.last_date:
                 self.daily_summary()
                 self.trades_today = 0
                 self.pnl_today    = 0.0
                 self.daily_log    = []
                 self.last_date    = now.date()
-                self.login()  # re-login
-                max_trades = self.brain.max_trades_today(vix_approx)
-                log.info(f"New day! Max trades: {max_trades}")
+                self.headers_added = False
+                self.login()
 
-            # ── Market closed ───────────────────────
+            # Market closed
             if not self.is_market_open():
-                log.info("Market closed. Next scan in 5 mins...")
+                log.info("Market closed. Waiting 5 mins...")
                 time.sleep(300)
                 continue
 
-            # ── Square off time ─────────────────────
-            if self.time_to_close():
+            # Sheet headers
+            if not self.headers_added:
+                init_sheet_headers()
+                self.headers_added = True
+
+            # Force close 3:10 PM
+            if self.closing_time():
                 if self.position:
-                    log.warning("3:15 PM — Force closing all positions")
-                    price = self.get_ltp(
-                        self.position["token"],
-                        self.position["exchange"]
-                    ) or self.position["entry"]
-                    self.close_trade(price, "Market Close 3:15PM")
+                    log.warning("3:10 PM — Force closing!")
+                    p = self.get_ltp(self.position["token"], self.position["exchange"])
+                    self.close_trade(p or self.position["entry"], "Market Close 3:10PM")
                 self.daily_summary()
-                log.info("Sleeping till tomorrow 9:15 AM...")
                 time.sleep(300)
                 continue
 
-            # ── Fetch index prices ──────────────────
-            nifty_price = self.get_ltp(
-                INDICES["NIFTY"]["token"],
-                INDICES["NIFTY"]["exchange"]
-            )
-            banknifty_price = self.get_ltp(
-                INDICES["BANKNIFTY"]["token"],
-                INDICES["BANKNIFTY"]["exchange"]
-            )
+            # Daily loss limit
+            if self.daily_loss_hit():
+                log.warning(f"Daily loss limit hit! P&L: ₹{self.pnl_today}")
+                if self.position:
+                    p = self.get_ltp(self.position["token"], self.position["exchange"])
+                    self.close_trade(p or self.position["entry"], "Daily Loss Limit")
+                tg(f"🚨 <b>Daily Loss Limit Hit!</b>\n"
+                   f"Loss: ₹{abs(round(self.pnl_today,2))} ({DAILY_LOSS_LIMIT}%)\n"
+                   f"Bot band ho gaya aaj ke liye!")
+                time.sleep(300)
+                continue
 
-            if nifty_price:
-                self.brain.add_price("NIFTY", nifty_price)
-                log.info(f"Nifty: {nifty_price}")
-            if banknifty_price:
-                self.brain.add_price("BANKNIFTY", banknifty_price)
-                log.info(f"BankNifty: {banknifty_price}")
+            # Fetch all 6 index prices
+            for idx, cfg in INDICES.items():
+                price = self.get_ltp(cfg["token"], cfg["exchange"])
+                if price:
+                    self.spot_prices[idx] = price
+                    self.brain.add(idx, price)
+                    log.info(f"  {idx}: ₹{price}")
 
-            # ── Monitor open position ───────────────
+            # Monitor open position
             if self.position:
-                self.monitor_position()
-                time.sleep(scan_interval)
+                self.monitor()
+                time.sleep(60)
                 continue
 
-            # ── Check if can take new trade ─────────
-            if not self.is_trading_window():
-                log.info("Outside ideal trading window (9:20-3:15)")
-                time.sleep(scan_interval)
+            # Max trades check
+            if self.trades_today >= self.max_trades():
+                log.info(f"Max trades done ({self.trades_today})")
+                time.sleep(60)
                 continue
 
-            if self.trades_today >= max_trades:
-                log.info(f"Max trades ({max_trades}) done today. Monitoring only.")
-                time.sleep(scan_interval)
+            if not self.best_time():
+                time.sleep(60)
                 continue
 
-            # ── AI Decision ─────────────────────────
-            index, direction, confidence, reasons = self.brain.decide(
-                nifty_price or 0,
-                banknifty_price or 0
-            )
+            # AI Decision
+            idx, direction, conf, reasons = self.brain.best_index(self.spot_prices)
 
-            for r in reasons:
-                log.info(f"  Brain: {r}")
+            log.info(f"AI Analysis: {idx} {direction} | {conf}%")
+            for r in (reasons or [])[:3]:
+                log.info(f"  → {r}")
 
-            if not index or confidence < 55:
-                log.info(f"Signal weak ({confidence}) — skipping. Next scan in {scan_interval}s")
-                time.sleep(scan_interval)
+            if not idx or conf < 60:
+                log.info(f"Signal weak ({conf}%) — waiting...")
+                time.sleep(60)
                 continue
 
-            # ── Get option price and trade ───────────
-            cfg   = INDICES[index]
-            spot  = nifty_price if index == "NIFTY" else banknifty_price
-            if not spot:
-                time.sleep(scan_interval); continue
-
-            strike  = OptionsHelper.nearest_strike(spot, cfg["strike_gap"])
-            expiry  = OptionsHelper.get_expiry()
-            symbol  = OptionsHelper.build_symbol(index, strike, direction, expiry)
-            token   = self.get_option_token(symbol, cfg["option_exch"])
-
-            if token:
-                option_price = self.get_ltp(token, cfg["option_exch"])
-                if option_price and option_price > 5:
-                    log.info(
-                        f"SIGNAL: {index} {direction} {strike} | "
-                        f"Option ₹{option_price} | Confidence: {confidence}%"
-                    )
-                    self.open_trade(index, direction, option_price)
-                else:
-                    log.warning(f"Option price too low or unavailable: {option_price}")
-            else:
-                log.warning(f"Could not find token for {symbol}")
-
-            time.sleep(scan_interval)
+            log.info(f"★ SIGNAL: {idx} {direction} | {conf}%")
+            self.open_trade(idx, direction, reasons or [])
+            time.sleep(60)
 
 
 if __name__ == "__main__":
-    bot = AngelBotPRO()
+    bot = AngelBot()
     bot.run()
