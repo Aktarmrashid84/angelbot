@@ -359,22 +359,50 @@ class AngelBot:
             log.warning(f"LTP error: {e}")
         return None
 
-    def get_option_token(self, symbol, exchange):
-        """Angel One searchScrip se token fetch karo"""
+    def load_nfo_tokens(self):
+        """NFO scrip master load karo — options tokens ke liye"""
+        if hasattr(self, 'nfo_tokens'):
+            return
         try:
-            # Search with full symbol
+            r = requests.get(
+                "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json",
+                timeout=30,
+                headers={"User-Agent": "Mozilla/5.0"}
+            )
+            data = r.json()
+            # Only NFO options
+            self.nfo_tokens = {}
+            for s in data:
+                if s.get("exch_seg") in ["NFO", "BFO"] and s.get("instrumenttype") in ["OPTIDX", "OPTSTK"]:
+                    self.nfo_tokens[s["symbol"]] = s["token"]
+            log.info(f"NFO tokens loaded: {len(self.nfo_tokens)}")
+            # Sample
+            sample = list(self.nfo_tokens.keys())[:3]
+            log.info(f"Sample NFO: {sample}")
+        except Exception as e:
+            log.warning(f"NFO load error: {e}")
+            self.nfo_tokens = {}
+
+    def get_option_token(self, symbol, exchange):
+        """NFO token fetch karo"""
+        # Try NFO scrip master first
+        self.load_nfo_tokens()
+        if hasattr(self, 'nfo_tokens') and symbol in self.nfo_tokens:
+            log.info(f"✓ NFO Token: {symbol} = {self.nfo_tokens[symbol]}")
+            return self.nfo_tokens[symbol]
+        
+        # Fallback: searchScrip
+        try:
             r = self.api.searchScrip(exchange, symbol)
             if r["status"] and r["data"]:
                 for item in r["data"]:
-                    ts = item.get("tradingsymbol","")
-                    if ts == symbol:
-                        log.info(f"✓ Token: {symbol} = {item['symboltoken']}")
+                    if item.get("tradingsymbol","") == symbol:
+                        log.info(f"✓ Search Token: {symbol}")
                         return item["symboltoken"]
-                # If exact match not found, return first result
-                log.info(f"✓ Token (first): {r['data'][0].get('tradingsymbol')} = {r['data'][0]['symboltoken']}")
                 return r["data"][0]["symboltoken"]
         except Exception as e:
             log.warning(f"Token search error: {e}")
+        
         log.warning(f"Token not found: {symbol}")
         return None
 
