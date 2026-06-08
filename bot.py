@@ -391,7 +391,7 @@ class AngelBot:
         exp = today + timedelta(days=days)
         if exp <= today:
             exp += timedelta(days=7)
-        return exp.strftime("%d%b%Y").upper()
+        return exp.strftime("%d%b%y").upper()
 
     def open_trade(self, index, direction, reasons):
         cfg = INDICES[index]
@@ -401,7 +401,7 @@ class AngelBot:
 
         strike = int(round(spot / cfg["strike_gap"]) * cfg["strike_gap"])
         expiry = self.get_expiry()
-        sym = f"{cfg['prefix']}{expiry}{'C' if direction=='CE' else 'P'}{strike}"
+        sym = f"{cfg['prefix']}{expiry}{strike}{'CE' if direction=='CE' else 'PE'}"
         token = self.get_option_token(sym, cfg["opt_exch"])
         if not token:
             log.warning(f"Token not found: {sym}")
