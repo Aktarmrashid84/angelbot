@@ -17,7 +17,6 @@ CLIENT_ID   = os.getenv("ANGEL_CLIENT_ID",  "M410221")
 PASSWORD    = os.getenv("ANGEL_PASSWORD",   "9864")
 TOTP_SECRET = os.getenv("ANGEL_TOTP",       "NNWTNV7ZSNVUYRNF4ZY4TY3LDU")
 CAPITAL     = float(os.getenv("CAPITAL",    "50000"))
-PAPER_TRADE = os.getenv("PAPER_TRADE", "true").lower() == "true"  # True = no real orders
 
 # ═══ TELEGRAM ══════════════════════════════════════════
 TG_TOKEN    = os.getenv("TG_TOKEN",    "8531854367:AAGvxR2XYFx0EHHiZNYQQP0JGxHkV0vZXIE")
@@ -408,15 +407,6 @@ class AngelBot:
         return None
 
     def place_order(self, symbol, token, side, qty, exchange):
-        # PAPER TRADE MODE
-        if PAPER_TRADE:
-            fake_id = f"PAPER_{side}_{symbol}_{int(time.time())}"
-            log.info(f"📝 PAPER {side} {symbol} x{qty} | ID:{fake_id}")
-            tg(f"📝 <b>PAPER TRADE {side}</b>
-{symbol} x{qty}
-(Simulated — no real order)")
-            return fake_id
-        # REAL ORDER
         try:
             r = self.api.placeOrder({
                 "variety": "NORMAL", "tradingsymbol": symbol,
@@ -456,14 +446,8 @@ class AngelBot:
         token = self.get_option_token(sym, cfg["opt_exch"])
         
         if not token:
-            if PAPER_TRADE:
-                # Paper trade mein simulated price use karo
-                log.info(f"📝 PAPER: Using simulated price for {sym}")
-                price = round(spot * 0.004, 2)  # approximate option price
-                token = "PAPER_TOKEN"
-            else:
-                log.warning(f"Token not found: {sym}")
-                return
+            log.warning(f"Token not found: {sym}")
+            return
 
         price = self.get_ltp(token, cfg["opt_exch"])
         if not price or price < 5:
