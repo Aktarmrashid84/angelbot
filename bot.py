@@ -359,37 +359,30 @@ class AngelBot:
             log.warning(f"LTP error: {e}")
         return None
 
-    def load_scrip_master(self):
-        if hasattr(self, 'scrip_master'):
-            return
-        try:
-            r = requests.get(
-                "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json",
-                timeout=30
-            )
-            data = r.json()
-            self.scrip_master = {s['name']: s['token'] for s in data if s.get('name')}
-            log.info(f"Scrip master loaded: {len(self.scrip_master)} scripts")
-            # Debug: show BANKNIFTY PE sample names
-            bn_pe = [k for k in self.scrip_master if 'BANKNIFTY' in k and 'PE' in k][:5]
-            log.info(f"Sample BANKNIFTY PE: {bn_pe}")
-            nf_pe = [k for k in self.scrip_master if 'NIFTY' in k and 'PE' in k and 'BANK' not in k and 'FIN' not in k and 'MID' not in k][:5]
-            log.info(f"Sample NIFTY PE: {nf_pe}")
-        except Exception as e:
-            log.warning(f"Scrip master error: {e}")
-            self.scrip_master = {}
-
     def get_option_token(self, symbol, exchange):
-        self.load_scrip_master()
-        if hasattr(self, 'scrip_master') and symbol in self.scrip_master:
-            log.info(f"Token found: {symbol}")
-            return self.scrip_master[symbol]
+        """Multiple formats try karke token dhundho"""
+        # Try exact symbol first
         try:
             r = self.api.searchScrip(exchange, symbol)
             if r["status"] and r["data"]:
+                log.info(f"Token found: {symbol} = {r['data'][0]['symboltoken']}")
                 return r["data"][0]["symboltoken"]
+        except Exception as e:
+            log.warning(f"Search error: {e}")
+
+        # Try partial search - just index name
+        try:
+            index_name = symbol[:9] if 'BANKNIFTY' in symbol else symbol[:5]
+            r = self.api.searchScrip(exchange, index_name)
+            if r["status"] and r["data"]:
+                # Find matching symbol
+                for item in r["data"]:
+                    if item.get("tradingsymbol") == symbol or item.get("name") == symbol:
+                        log.info(f"Token found via partial: {symbol}")
+                        return item["symboltoken"]
         except:
             pass
+
         log.warning(f"Token not found: {symbol}")
         return None
 
@@ -425,11 +418,29 @@ class AngelBot:
             return
 
         strike = int(round(spot / cfg["strike_gap"]) * cfg["strike_gap"])
-        expiry = self.get_expiry()
-        sym = f"{cfg['prefix']}{expiry}{strike}{'CE' if direction=='CE' else 'PE'}"
-        token = self.get_option_token(sym, cfg["opt_exch"])
+        expiry = self.get_expiry()  # e.g. 12JUN26
+        opt_type = "CE" if direction == "CE" else "PE"
+        
+        # Try multiple Angel One symbol formats
+        token = None
+        sym = None
+        formats_to_try = [
+            f"{cfg['prefix']}{expiry}{strike}{opt_type}",   # NIFTY12JUN2623200CE
+            f"{cfg['prefix']}{expiry}{opt_type}{strike}",   # NIFTY12JUN26CE23200
+            f"{cfg['prefix']}{strike}{opt_type}",           # NIFTY23200CE (no expiry)
+        ]
+        
+        for fmt in formats_to_try:
+            log.info(f"Trying symbol: {fmt}")
+            t = self.get_option_token(fmt, cfg["opt_exch"])
+            if t:
+                token = t
+                sym = fmt
+                log.info(f"✓ Symbol works: {fmt}")
+                break
+        
         if not token:
-            log.warning(f"Token not found: {sym}")
+            log.warning(f"All formats failed: {formats_to_try}")
             return
 
         price = self.get_ltp(token, cfg["opt_exch"])
@@ -561,9 +572,6 @@ class AngelBot:
 
         if not self.login():
             return
-
-        # Load scrip master at startup
-        self.load_scrip_master()
 
         while True:
             now = datetime.now()
