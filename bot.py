@@ -370,6 +370,11 @@ class AngelBot:
             data = r.json()
             self.scrip_master = {s['name']: s['token'] for s in data if s.get('name')}
             log.info(f"Scrip master loaded: {len(self.scrip_master)} scripts")
+            # Debug: show BANKNIFTY PE sample names
+            bn_pe = [k for k in self.scrip_master if 'BANKNIFTY' in k and 'PE' in k][:5]
+            log.info(f"Sample BANKNIFTY PE: {bn_pe}")
+            nf_pe = [k for k in self.scrip_master if 'NIFTY' in k and 'PE' in k and 'BANK' not in k and 'FIN' not in k and 'MID' not in k][:5]
+            log.info(f"Sample NIFTY PE: {nf_pe}")
         except Exception as e:
             log.warning(f"Scrip master error: {e}")
             self.scrip_master = {}
