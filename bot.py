@@ -360,29 +360,21 @@ class AngelBot:
         return None
 
     def get_option_token(self, symbol, exchange):
-        """Multiple formats try karke token dhundho"""
-        # Try exact symbol first
+        """Angel One searchScrip se token fetch karo"""
         try:
+            # Search with full symbol
             r = self.api.searchScrip(exchange, symbol)
             if r["status"] and r["data"]:
-                log.info(f"Token found: {symbol} = {r['data'][0]['symboltoken']}")
+                for item in r["data"]:
+                    ts = item.get("tradingsymbol","")
+                    if ts == symbol:
+                        log.info(f"✓ Token: {symbol} = {item['symboltoken']}")
+                        return item["symboltoken"]
+                # If exact match not found, return first result
+                log.info(f"✓ Token (first): {r['data'][0].get('tradingsymbol')} = {r['data'][0]['symboltoken']}")
                 return r["data"][0]["symboltoken"]
         except Exception as e:
-            log.warning(f"Search error: {e}")
-
-        # Try partial search - just index name
-        try:
-            index_name = symbol[:9] if 'BANKNIFTY' in symbol else symbol[:5]
-            r = self.api.searchScrip(exchange, index_name)
-            if r["status"] and r["data"]:
-                # Find matching symbol
-                for item in r["data"]:
-                    if item.get("tradingsymbol") == symbol or item.get("name") == symbol:
-                        log.info(f"Token found via partial: {symbol}")
-                        return item["symboltoken"]
-        except:
-            pass
-
+            log.warning(f"Token search error: {e}")
         log.warning(f"Token not found: {symbol}")
         return None
 
@@ -420,27 +412,13 @@ class AngelBot:
         strike = int(round(spot / cfg["strike_gap"]) * cfg["strike_gap"])
         expiry = self.get_expiry()  # e.g. 12JUN26
         opt_type = "CE" if direction == "CE" else "PE"
+        sym = f"{cfg['prefix']}{expiry}{strike}{opt_type}"
         
-        # Try multiple Angel One symbol formats
-        token = None
-        sym = None
-        formats_to_try = [
-            f"{cfg['prefix']}{expiry}{strike}{opt_type}",   # NIFTY12JUN2623200CE
-            f"{cfg['prefix']}{expiry}{opt_type}{strike}",   # NIFTY12JUN26CE23200
-            f"{cfg['prefix']}{strike}{opt_type}",           # NIFTY23200CE (no expiry)
-        ]
-        
-        for fmt in formats_to_try:
-            log.info(f"Trying symbol: {fmt}")
-            t = self.get_option_token(fmt, cfg["opt_exch"])
-            if t:
-                token = t
-                sym = fmt
-                log.info(f"✓ Symbol works: {fmt}")
-                break
+        log.info(f"Searching token for: {sym}")
+        token = self.get_option_token(sym, cfg["opt_exch"])
         
         if not token:
-            log.warning(f"All formats failed: {formats_to_try}")
+            log.warning(f"Token not found: {sym}")
             return
 
         price = self.get_ltp(token, cfg["opt_exch"])
