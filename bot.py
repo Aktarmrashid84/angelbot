@@ -359,13 +359,33 @@ class AngelBot:
             log.warning(f"LTP error: {e}")
         return None
 
+    def load_scrip_master(self):
+        if hasattr(self, 'scrip_master'):
+            return
+        try:
+            r = requests.get(
+                "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json",
+                timeout=30
+            )
+            data = r.json()
+            self.scrip_master = {s['name']: s['token'] for s in data if s.get('name')}
+            log.info(f"Scrip master loaded: {len(self.scrip_master)} scripts")
+        except Exception as e:
+            log.warning(f"Scrip master error: {e}")
+            self.scrip_master = {}
+
     def get_option_token(self, symbol, exchange):
+        self.load_scrip_master()
+        if hasattr(self, 'scrip_master') and symbol in self.scrip_master:
+            log.info(f"Token found: {symbol}")
+            return self.scrip_master[symbol]
         try:
             r = self.api.searchScrip(exchange, symbol)
             if r["status"] and r["data"]:
                 return r["data"][0]["symboltoken"]
         except:
             pass
+        log.warning(f"Token not found: {symbol}")
         return None
 
     def place_order(self, symbol, token, side, qty, exchange):
