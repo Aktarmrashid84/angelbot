@@ -320,6 +320,7 @@ class AngelBot:
             r = self.api.generateSession(CLIENT_ID, PASSWORD, totp)
             if r["status"]:
                 log.info(f"✓ Login: {CLIENT_ID}")
+                self.load_scrip_master()  # Load at startup
                 tg(f"🤖 <b>AngelBot PRO MAX Started!</b>\n"
                    f"💰 Capital: ₹{CAPITAL}\n"
                    f"🎯 Target: {TARGET_PCT}% | 🛑 SL: {SL_PCT}%\n"
