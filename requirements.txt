@@ -5,3 +5,4 @@ requests
 websocket-client
 loguru
 logzero
+cryptography
