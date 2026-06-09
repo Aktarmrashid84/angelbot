@@ -329,8 +329,12 @@ class AngelBot:
             log.warning("Option price too low: " + str(price))
             return
 
-        lots = max(1, int(CAPITAL * MAX_TRADE_PCT / (price * cfg["lot"])))
-        qty = lots * cfg["lot"]
+        lot_size = cfg["lot"]
+        max_cap = CAPITAL * MAX_TRADE_PCT
+        lots = max(1, int(max_cap / (price * lot_size)))
+        # If even 1 lot too expensive, use 1 lot anyway
+        qty = lots * lot_size
+        log.info("Lots: " + str(lots) + " Qty: " + str(qty) + " Price: Rs." + str(price) + " Cost: Rs." + str(round(price * qty, 2)))
         sl = round(price * (1 - SL_PCT / 100), 2)
         tp = round(price * (1 + TARGET_PCT / 100), 2)
 
