@@ -412,9 +412,7 @@ class AngelBot:
         if PAPER_TRADE:
             fake_id = f"PAPER_{side}_{symbol}_{int(time.time())}"
             log.info(f"📝 PAPER {side} {symbol} x{qty} | ID:{fake_id}")
-            tg(f"📝 <b>PAPER TRADE {side}</b>
-{symbol} x{qty}
-(Simulated — no real order)")
+            tg(f"PAPER TRADE {side}\n{symbol} x{qty}\nSimulated")
             return fake_id
         # REAL ORDER
         try:
