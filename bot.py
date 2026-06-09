@@ -204,10 +204,24 @@ class AngelBot:
         self.nfo_tokens = {}
         self.highest_price = 0
 
+    def get_public_ip(self):
+        try:
+            r = requests.get("https://api.ipify.org?format=json", timeout=5)
+            ip = r.json()["ip"]
+            log.info("Public IP: " + ip)
+            return ip
+        except:
+            return "106.193.147.98"
+
     def login(self):
         try:
+            public_ip = self.get_public_ip()
             totp = pyotp.TOTP(TOTP_SECRET).now()
             self.api = SmartConnect(api_key=API_KEY)
+            self.api.root = "https://apiconnect.angelbroking.com"
+            # Set correct public IP
+            import SmartApi.smartConnect as sc
+            sc.DEFAULT_PUBLIC_IP = public_ip
             r = self.api.generateSession(CLIENT_ID, PASSWORD, totp)
             if r["status"]:
                 log.info("Login OK: " + CLIENT_ID)
