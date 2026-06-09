@@ -17,6 +17,7 @@ CLIENT_ID   = os.getenv("ANGEL_CLIENT_ID",  "M410221")
 PASSWORD    = os.getenv("ANGEL_PASSWORD",   "9864")
 TOTP_SECRET = os.getenv("ANGEL_TOTP",       "NNWTNV7ZSNVUYRNF4ZY4TY3LDU")
 CAPITAL     = float(os.getenv("CAPITAL",    "50000"))
+PAPER_TRADE = os.getenv("PAPER_TRADE", "true").lower() == "true"  # True = no real orders
 
 # ═══ TELEGRAM ══════════════════════════════════════════
 TG_TOKEN    = os.getenv("TG_TOKEN",    "8531854367:AAGvxR2XYFx0EHHiZNYQQP0JGxHkV0vZXIE")
@@ -407,6 +408,15 @@ class AngelBot:
         return None
 
     def place_order(self, symbol, token, side, qty, exchange):
+        # PAPER TRADE MODE
+        if PAPER_TRADE:
+            fake_id = f"PAPER_{side}_{symbol}_{int(time.time())}"
+            log.info(f"📝 PAPER {side} {symbol} x{qty} | ID:{fake_id}")
+            tg(f"📝 <b>PAPER TRADE {side}</b>
+{symbol} x{qty}
+(Simulated — no real order)")
+            return fake_id
+        # REAL ORDER
         try:
             r = self.api.placeOrder({
                 "variety": "NORMAL", "tradingsymbol": symbol,
@@ -442,12 +452,29 @@ class AngelBot:
         opt_type = "CE" if direction == "CE" else "PE"
         sym = f"{cfg['prefix']}{expiry}{strike}{opt_type}"
         
-        log.info(f"Searching token for: {sym}")
-        token = self.get_option_token(sym, cfg["opt_exch"])
+        # Search in NFO tokens with fuzzy match
+        self.load_nfo_tokens()
+        token = None
+        sym = None
+        
+        if hasattr(self, 'nfo_tokens'):
+            opt_type = "CE" if direction == "CE" else "PE"
+            # Find closest matching token
+            prefix = cfg['prefix']
+            for name, tok in self.nfo_tokens.items():
+                if (name.startswith(prefix) and 
+                    name.endswith(opt_type) and 
+                    str(strike) in name):
+                    sym = name
+                    token = tok
+                    log.info(f"✓ Found matching token: {name} = {tok}")
+                    break
         
         if not token:
-            log.warning(f"Token not found: {sym}")
+            log.warning(f"No token found for {cfg['prefix']} {strike} {direction}")
             return
+        
+        log.info(f"Using symbol: {sym}")
 
         price = self.get_ltp(token, cfg["opt_exch"])
         if not price or price < 5:
@@ -594,8 +621,21 @@ class AngelBot:
 
             # Market closed
             if not self.is_market_open():
-                log.info("Market closed. Waiting 5 mins...")
-                time.sleep(300)
+                now = datetime.now()
+                # Calculate seconds until next market open (9:15 AM)
+                next_open = now.replace(hour=9, minute=15, second=0, microsecond=0)
+                if now.time() >= dtime(15, 30):
+                    # Market closed for today - sleep till tomorrow 9:15 AM
+                    next_open += timedelta(days=1)
+                    # Skip weekends
+                    while next_open.weekday() >= 5:
+                        next_open += timedelta(days=1)
+                
+                sleep_secs = max(60, (next_open - now).total_seconds())
+                sleep_hrs  = int(sleep_secs // 3600)
+                sleep_mins = int((sleep_secs % 3600) // 60)
+                log.info(f"Market closed. Sleeping {sleep_hrs}h {sleep_mins}m till {next_open.strftime('%d %b %H:%M')}...")
+                time.sleep(sleep_secs)
                 continue
 
             # Sheet headers
